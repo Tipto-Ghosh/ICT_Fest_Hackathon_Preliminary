@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from ..models import Booking, Room
 from ..timeutils import iso_utc
+from ..errors import AppError
 
 EXPORT_HEADER = [
     "id",
@@ -47,6 +48,11 @@ def generate_export(
 ) -> str:
     if include_all:
         if room_id is not None:
+            # BUG: fetch_bookings_raw leaks cross-org data – no ownership check.
+            # FIX: Verify room belongs to the admin's org, else 404.
+            room = db.query(Room).filter(Room.id == room_id, Room.org_id == org_id).first()
+            if not room:
+                raise AppError(404, "ROOM_NOT_FOUND", "Room not found")
             rows = fetch_bookings_raw(db, room_id)
         else:
             rows = _fetch_scoped(db, org_id, None, None)
