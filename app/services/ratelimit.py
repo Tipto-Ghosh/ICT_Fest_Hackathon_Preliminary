@@ -1,11 +1,15 @@
 """Per-user rolling-window rate limiting for booking creation."""
 import time
+import threading
 
 from ..errors import AppError
 
 _WINDOW_SECONDS = 60
 _MAX_REQUESTS = 20
 
+# BUG: Dict operations are not thread-safe; concurrent requests can bypass the limit.
+# FIX: Add a lock to serialize bucket updates.
+_lock = threading.Lock()
 _buckets: dict[int, list[float]] = {}
 
 
@@ -17,10 +21,10 @@ def _settle_pause() -> None:
 
 def record_and_check(user_id: int) -> None:
     now = time.time()
-    bucket = _buckets.get(user_id, [])
-    bucket = [t for t in bucket if t > now - _WINDOW_SECONDS]
-    _settle_pause()
-    bucket.append(now)
-    _buckets[user_id] = bucket
-    if len(bucket) > _MAX_REQUESTS:
-        raise AppError(429, "RATE_LIMITED", "Too many booking requests")
+    with _lock:
+        bucket = _buckets.get(user_id, [])
+        bucket = [t for t in bucket if t > now - _WINDOW_SECONDS]
+        bucket.append(now)
+        _buckets[user_id] = bucket
+        if len(bucket) > _MAX_REQUESTS:
+            raise AppError(429, "RATE_LIMITED", "Too many booking requests")
