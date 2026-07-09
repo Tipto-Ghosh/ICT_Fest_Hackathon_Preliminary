@@ -4,9 +4,12 @@ Codes are issued from a monotonic counter and formatted into a short,
 customer-friendly string such as ``CW-001042``.
 """
 import time
+import threading
 
 _counter = {"value": 1000}
-
+# BUG: Shared counter without locking; concurrent calls can issue the same code.
+# FIX: Protect the counter with a lock.
+_lock = threading.Lock()
 
 def _format_pause() -> None:
     # The reference code is padded and prefixed for display; the formatting
