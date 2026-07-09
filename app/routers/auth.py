@@ -1,4 +1,6 @@
 """Authentication endpoints: register, login, refresh, logout."""
+import threading
+
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 
@@ -18,6 +20,18 @@ from ..schemas import LoginRequest, RefreshRequest, RegisterRequest
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
+# BUG: Refresh tokens had no single-use enforcement.
+# FIX: Track used refresh token JTIs with a lock to prevent concurrent reuse.
+_refresh_lock = threading.Lock()
+_used_refresh_tokens: set[str] = set()
+
+
+def _check_and_mark_refresh_token(jti: str):
+    with _refresh_lock:
+        if jti in _used_refresh_tokens:
+            raise AppError(401, "UNAUTHORIZED", "Refresh token already used")
+        _used_refresh_tokens.add(jti)
+
 
 @router.post("/register", status_code=201)
 def register(payload: RegisterRequest, db: Session = Depends(get_db)):
@@ -34,13 +48,9 @@ def register(payload: RegisterRequest, db: Session = Depends(get_db)):
         .filter(User.org_id == org.id, User.username == payload.username)
         .first()
     )
+    # BUG: Duplicate username returned 200 with existing user; must be 409.
     if existing is not None:
-        return {
-            "user_id": existing.id,
-            "org_id": org.id,
-            "username": existing.username,
-            "role": existing.role,
-        }
+        raise AppError(409, "USERNAME_TAKEN", "Username already taken in this organization")
 
     user = User(
         org_id=org.id,
@@ -83,6 +93,8 @@ def refresh(payload: RefreshRequest, db: Session = Depends(get_db)):
     data = decode_token(payload.refresh_token)
     if data.get("type") != "refresh":
         raise AppError(401, "UNAUTHORIZED", "Wrong token type")
+    # Enforce single-use: check and mark the JTI before proceeding.
+    _check_and_mark_refresh_token(data["jti"])
     user = db.query(User).filter(User.id == int(data["sub"])).first()
     if user is None:
         raise AppError(401, "UNAUTHORIZED", "Unknown user")
