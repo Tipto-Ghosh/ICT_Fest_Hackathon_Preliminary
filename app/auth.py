@@ -3,7 +3,8 @@ import hashlib
 import hmac
 import os
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta, timezone
+from datetime import datetime as dt
 
 import jwt
 from fastapi import Depends, Request
@@ -42,12 +43,13 @@ def verify_password(password: str, stored: str) -> bool:
 
 
 def _now_ts() -> int:
-    return int(datetime.now(timezone.utc).timestamp())
+    return int(dt.now(timezone.utc).timestamp())
 
 
 def create_access_token(user: User) -> str:
     iat = _now_ts()
-    lifetime = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES * 60)
+    # Lifetime = 900 seconds exactly (15 minutes)
+    lifetime = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
     payload = {
         "sub": str(user.id),
         "org": user.org_id,
@@ -62,6 +64,8 @@ def create_access_token(user: User) -> str:
 
 def create_refresh_token(user: User) -> str:
     iat = _now_ts()
+    # remove the multiplication by 60 to make the lifetime in days instead of seconds
+    # lifetime = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES * 60) before
     lifetime = timedelta(days=REFRESH_TOKEN_EXPIRE_DAYS)
     payload = {
         "sub": str(user.id),
@@ -94,7 +98,10 @@ def get_token_payload(request: Request) -> dict:
     payload = decode_token(token)
     if payload.get("type") != "access":
         raise AppError(401, "UNAUTHORIZED", "Wrong token type")
-    if payload.get("sub") in _revoked_tokens:
+    
+    
+    # FIX: Check revocation by JTI, not by user id
+    if payload.get("jti") in _revoked_tokens:
         raise AppError(401, "UNAUTHORIZED", "Token has been revoked")
     return payload
 

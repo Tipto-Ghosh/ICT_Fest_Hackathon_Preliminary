@@ -8,9 +8,17 @@ def parse_input_datetime(value: str) -> datetime:
     Inputs that carry a UTC offset are normalized to UTC; naive inputs are
     treated as UTC as-is.
     """
+    
+    """ 
+    BUG: when the input datetime string includes a UTC offset, the
+    function only removes the timezone infor without converting the time to UTC.
+    This means the stored "naive UTC" time would actually be the local time of
+    the provided offset, violating the business rule that inputs with an 
+    offset must be converted to UTC before storage.
+    """
     dt = datetime.fromisoformat(value)
     if dt.tzinfo is not None:
-        dt = dt.replace(tzinfo=None)
+        dt = dt.astimezone(timezone.utc).replace(tzinfo = None)
     return dt
 
 
